@@ -36,25 +36,18 @@ jobs:
       - name: Run screenshot script
         run: python take_screenshots.py
 
-      - name: Check for new screenshots
-        id: check
+      - name: Commit and push new screenshots
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add postcards/
           if git diff --cached --quiet; then
-            echo "changed=false" >> $GITHUB_OUTPUT
             echo "No new screenshots — nothing to commit."
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            COUNT=$(git diff --cached --name-only | wc -l)
-            echo "New files: $COUNT"
-            git diff --cached --name-only
+            git stash
+            git pull --rebase origin main
+            git stash pop
+            git add postcards/
+            git commit -m "Add preview screenshots $(date +'%Y-%m-%d')"
+            git push origin main
           fi
-
-      - name: Commit and push new screenshots
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          git commit -m "Add preview screenshots $(date +'%Y-%m-%d')"
-          git pull --rebase origin main
-          git push origin main
