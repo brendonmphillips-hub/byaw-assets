@@ -1,53 +1,88 @@
-name: Take Preview Screenshots
+#!/usr/bin/env python3
+"""
+BYAW Screenshot Script
+Reads sites.csv, takes desktop + mobile screenshots of each preview URL.
+Scrolls past the BYAW claim header before capturing so the hero is the
+first thing visible — cleaner for postcard mockups.
+Skips any business that already has both desktop.png and mobile.png.
 
-on:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: 'Why are you running this? (optional note)'
-        required: false
-        default: 'New businesses added to sites.csv'
+To add a new business: add a row to sites.csv. That's it.
 
-permissions:
-  contents: write
+Output structure (matches asset server path):
+  postcards/{campaign}/{claim_code}/desktop.png
+  postcards/{campaign}/{claim_code}/mobile.png
+"""
 
-jobs:
-  screenshots:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+import csv
+import os
+import time
+from playwright.sync_api import sync_playwright
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+BASE_URL    = 'https://builtyouawebsite.com'
+SITES_CSV   = 'sites.csv'
+SCROLL_WAIT = 2.0
+NAV_TIMEOUT = 30000
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+DESKTOP_W = 1440
+DESKTOP_H = 900
+MOBILE_W  = 390
+MOBILE_H  = 844
 
-      - name: Install dependencies
-        run: |
-          pip install playwright
-          python -m playwright install chromium
-          python -m playwright install-deps chromium
+SCROLL_PAST_HEADER = """
+() => {
+    const selectors = ['section.claim', '.claim', '[aria-label="Built You A Website preview information"]'];
+    for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.offsetHeight > 0) {
+            window.scrollTo(0, el.offsetHeight);
+            return el.offsetHeight;
+        }
+    }
+    window.scrollTo(0, 180);
+    return 180;
+}
+"""
 
-      - name: Run screenshot script
-        run: python take_screenshots.py
 
-      - name: Commit and push new screenshots
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add postcards/
-          if git diff --cached --quiet; then
-            echo "No new screenshots — nothing to commit."
-          else
-            git stash
-            git pull --rebase origin main
-            git stash pop
-            git add postcards/
-            git commit -m "Add preview screenshots $(date +'%Y-%m-%d')"
-            git push origin main
-          fi
+def load_sites(csv_path):
+    sites = []
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sites.append({
+                'code':     row['claim_code'].strip(),
+                'slug':     row['slug'].strip(),
+                'name':     row['business_name'].strip(),
+                'campaign': row['campaign'].strip(),
+            })
+    return sites
+
+
+def already_done(campaign, code):
+    base = os.path.join('postcards', campaign, code)
+    return (
+        os.path.exists(os.path.join(base, 'desktop.png')) and
+        os.path.exists(os.path.join(base, 'mobile.png'))
+    )
+
+
+def shoot(browser, url, viewport_w, viewport_h, scale, is_mobile, out_path):
+    ctx = browser.new_context(
+        viewport={'width': viewport_w, 'height': viewport_h},
+        device_scale_factor=scale,
+        is_mobile=is_mobile,
+        has_touch=is_mobile,
+    )
+    page = ctx.new_page()
+    page.goto(url, wait_until='networkidle', timeout=NAV_TIMEOUT)
+    time.sleep(SCROLL_WAIT)
+    scrolled_by = page.evaluate(SCROLL_PAST_HEADER)
+    time.sleep(0.3)
+    page.screenshot(path=out_path, full_page=False)
+    ctx.close()
+    return scrolled_by
+
+
+def take_screenshots():
+    sites   = load_sites(SITES_CSV)
+    total   =
