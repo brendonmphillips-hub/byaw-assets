@@ -1,0 +1,56 @@
+name: Take Preview Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why are you running this? (optional note)'
+        required: false
+        default: 'New businesses added to sites.csv'
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+
+      - name: Run screenshot script
+        run: python take_screenshots.py
+
+      - name: Check for new screenshots
+        id: check
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add postcards/
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No new screenshots — nothing to commit."
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            COUNT=$(git diff --cached --name-only | wc -l)
+            echo "New files: $COUNT"
+            git diff --cached --name-only
+          fi
+
+      - name: Commit and push new screenshots
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git commit -m "Add preview screenshots $(date +'%Y-%m-%d')"
+          git push
