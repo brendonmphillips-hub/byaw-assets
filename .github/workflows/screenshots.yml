@@ -53,4 +53,4 @@ jobs:
         if: steps.check.outputs.changed == 'true'
         run: |
           git commit -m "Add preview screenshots $(date +'%Y-%m-%d')"
-          git push
+          git push --force-with-lease
